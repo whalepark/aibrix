@@ -333,6 +333,9 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
   - `CaptureArtifacts()`와 `Teardown()`에서 Dynamo CR, generated workloads, logs, Helm release 상태를 다룬다.
 - `internal/deployers/dynamo_release.go`
   - deploy 실행 단계의 Dynamo release source abstraction을 둔다.
+  - `DynamoTagSource` interface와 `GitDynamoTagSource` production 구현을 둔다.
+  - `DynamoDeployer` lifecycle code가 git command 세부사항을 알지 않도록 release tag 검증을 이 계약 뒤에 숨긴다.
+  - `NewGitDynamoTagSource()`는 production runner와 upstream repo URL을 연결한다.
   - `ValidateDynamoReleaseTag(ctx, version)` public wrapper와 테스트 주입용 내부 helper를 둔다.
   - 우선 `git ls-remote --tags --refs https://github.com/ai-dynamo/dynamo.git refs/tags/<version>` 기반 remote tag existence 검증을 수행한다.
   - deployer 경계에서도 `^v[0-9]+\.[0-9]+\.[0-9]+$` stable tag format을 방어적으로 검증한다.
@@ -357,7 +360,7 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
 - `benchmark/testdata/scenarios/*.yaml`
   - `dynamo-hello-world.yaml`을 추가한다.
   - scenario에는 `provider: dynamo`, `version`, `engine.manifest`, `benchmark`만 넣는다.
-  - `version: 1.2.1`이 resolver에서 `v1.2.1`로 normalize되고 release tag helper로 전달되는 경로를 테스트한다.
+  - `version: 1.2.1`이 resolver에서 `v1.2.1`로 normalize되는 경로는 resolver 테스트에서 검증한다.
 - `benchmark/testdata/deployments/dynamo/*.yaml`
   - `qwen3-32b-round-robin-4p8d.yaml` fixture를 추가한다.
   - `/brixbench/.tmp/dynamo-reference/Routing_Test_dynamo_1.2.0-ds-v4-dev3_vllm_0.21.0/deploy_server_4p8d.yaml`을 거의 그대로 가져온다.
@@ -376,11 +379,10 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
 - [x] Dynamo version normalize
 - stable release tag 정책
   - [x] remote release tag existence 검증 helper
-  - [x] scenario YAML에서 normalized version을 release tag helper에 전달하는 테스트
   - [x] reference 기반 DynamoGraphDeployment fixture 추가
   - [ ] deployer lifecycle 연결
   - [ ] main reachable 검증
-- deployer 단계의 tag source abstraction
+- [x] deployer 단계의 tag source abstraction
 - release checkout 또는 chart path 준비
 - Dynamo platform Helm install
 - user-provided Dynamo CR apply
@@ -394,7 +396,7 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
 현재 진행상황:
 
 - AIBrix hello-world regression은 통과했다. benchmark는 100/100 successful이었고 `brixbench-adhoc` namespace cleanup까지 완료됐다.
-- Dynamo는 아직 live deploy 범위가 아니다. 현재 검증 범위는 `provider: dynamo` scenario YAML에서 version을 읽고, resolver normalize 후 remote release tag existence helper에 전달하는 tag-policy 경로다.
+- Dynamo는 아직 live deploy 범위가 아니다. 현재 검증 범위는 resolver의 version normalize와 deployer의 remote release tag existence helper를 각각 독립적으로 검증하는 단계다.
 - Dynamo deployment fixture는 live deploy를 보장하는 축약 예제가 아니라, 제공된 reference `deploy_server_4p8d.yaml` 기반의 qwen3-32b round-robin 4P8D fixture다.
 
 제외:
