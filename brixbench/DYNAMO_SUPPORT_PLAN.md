@@ -364,8 +364,8 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
 
 포함:
 
-- Dynamo provider 입력 validation
-- Dynamo version normalize
+- [x] Dynamo provider 입력 validation
+- [x] Dynamo version normalize
 - stable release tag 정책
 - deployer 단계의 tag source abstraction
 - release checkout 또는 chart path 준비
