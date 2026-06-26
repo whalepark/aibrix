@@ -327,25 +327,27 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
   - `DeployControlPlane()`에서 Dynamo release checkout/chart path를 준비하고 Helm install을 수행한다.
   - `DeployGateway()`는 no-op으로 구현하되 lifecycle 호출이 성공하도록 유지한다.
   - `DeployEngine()`에서 user-provided `DynamoGraphDeployment` manifest를 그대로 apply한다.
+  - Dynamo용 최소 command execution/logging helper도 이 파일 안에 둔다.
+  - `Teardown()`에서 applied CR, Helm release, benchmark namespace를 best-effort로 정리한다.
   - cluster-specific 설정을 코드에서 생성하거나 보정하지 않는다. 필요한 값은 `engine.manifest` 또는 향후 명시적 values hook으로 전달한다.
   - `WaitForReady()`에서 Frontend/worker readiness를 필수 확인하고 OpenAI-compatible probe는 모델명을 확인할 수 있을 때 optional로 수행한다.
   - `GetGatewayEndpoint()`에서 Dynamo Frontend service URL을 반환한다.
   - `CaptureArtifacts()`와 `Teardown()`에서 Dynamo CR, generated workloads, logs, Helm release 상태를 다룬다.
 - `internal/deployers/dynamo_release.go`
   - deploy 실행 단계의 Dynamo release source abstraction을 둔다.
-  - `DynamoTagSource` interface와 `GitDynamoTagSource` production 구현을 둔다.
-  - `DynamoDeployer` lifecycle code가 git command 세부사항을 알지 않도록 release tag 검증을 이 계약 뒤에 숨긴다.
-  - `NewGitDynamoTagSource()`는 production runner와 upstream repo URL을 연결한다.
+  - `DynamoReleaseSource` interface와 `GitDynamoReleaseSource` production 구현을 둔다.
+  - `DynamoDeployer` lifecycle code가 git command 세부사항을 알지 않도록 release tag 검증과 checkout/chart path 준비를 이 계약 뒤에 숨긴다.
+  - `NewGitDynamoReleaseSource()`는 production runner와 upstream repo URL을 연결한다.
   - `ValidateDynamoReleaseTag(ctx, version)` public wrapper와 테스트 주입용 내부 helper를 둔다.
   - 우선 `git ls-remote --tags --refs https://github.com/ai-dynamo/dynamo.git refs/tags/<version>` 기반 remote tag existence 검증을 수행한다.
   - deployer 경계에서도 `^v[0-9]+\.[0-9]+\.[0-9]+$` stable tag format을 방어적으로 검증한다.
   - `ls-remote` output은 line/field 단위로 파싱해서 `refs/tags/<version>` exact match만 허용한다.
   - git command 실패 시 exit status뿐 아니라 trimmed command output도 error에 포함한다.
-  - release checkout과 가능한 경우 main-reachable 검증은 같은 release 경계 안에서 별도 함수로 추가한다.
+  - `PrepareRelease(ctx, projectRoot, version)`에서 `.tmp/dynamo/<version>` checkout과 `deploy/helm/charts/platform` chart path 확인을 수행한다.
+  - 기존 checkout에 chart path가 있으면 clone을 생략하고 재사용한다.
+  - 기존 checkout이 있지만 chart path가 없으면 자동 삭제/복구하지 않고 명확히 실패시킨다.
+  - 가능한 경우 main-reachable 검증은 같은 release 경계 안에서 별도 함수로 추가한다.
   - unit test는 fake tag source나 fake command runner를 주입해 네트워크 없이 검증한다.
-- `internal/deployers/dynamo_commands.go`
-  - Helm/kubectl command construction과 command logging helper를 둔다.
-  - 실제 command 실행과 테스트 가능한 command builder를 분리한다.
 - `internal/deployers/command_logs.go`
   - 현재 AIBrix receiver에 묶인 command log helper를 provider-neutral helper로 정리한다.
   - AIBrix와 Dynamo deployer가 같은 log format을 쓰되, provider-specific command builder는 각 deployer 파일에 둔다.
@@ -355,6 +357,7 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
 - `benchmark/runner_test.go`
   - `provider: dynamo`를 `NewDynamoDeployer()`에 연결한다.
   - `DeployControlPlane()`, `DeployGateway()`, `DeployEngine()`, `WaitForReady()` 순서로 lifecycle을 명시적으로 호출한다.
+  - deployment setup 실패 시에도 초기화된 deployer가 있으면 teardown을 호출해 부분 배포 리소스가 남지 않게 한다.
   - Dynamo deployer는 `deployers.Config.TestCase.Version`에서 resolver가 normalize한 version을 읽는다.
   - benchmark driver는 기존처럼 provider와 분리해 유지한다.
 - `benchmark/testdata/scenarios/*.yaml`
@@ -370,6 +373,7 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
   - provider input validation과 version normalization은 네트워크 없는 단위 테스트로 유지한다.
 - `internal/deployers/*_test.go`
   - command builder, service discovery, readiness predicate를 Kubernetes cluster 없이 테스트한다.
+  - 현재 Dynamo deployer/release source 테스트는 `internal/deployers/dynamo_test.go` 하나에 모아 둔다.
 
 ## 1차 구현 범위
 
@@ -380,23 +384,27 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
 - stable release tag 정책
   - [x] remote release tag existence 검증 helper
   - [x] reference 기반 DynamoGraphDeployment fixture 추가
-  - [ ] deployer lifecycle 연결
+  - [x] deployer lifecycle 연결
   - [ ] main reachable 검증
 - [x] deployer 단계의 tag source abstraction
-- release checkout 또는 chart path 준비
-- Dynamo platform Helm install
-- user-provided Dynamo CR apply
+- [x] release checkout 또는 chart path 준비
+- [x] Dynamo platform Helm install
+- [x] user-provided Dynamo CR apply
 - Frontend service endpoint resolution
 - Frontend/worker 중심 basic readiness wait
 - 모델명을 확인할 수 있을 때만 OpenAI-compatible readiness probe
 - artifact capture
-- teardown
+- [x] minimal teardown: non-blocking CR delete와 best-effort finalizer cleanup 포함
 - unit tests
 
 현재 진행상황:
 
 - AIBrix hello-world regression은 통과했다. benchmark는 100/100 successful이었고 `brixbench-adhoc` namespace cleanup까지 완료됐다.
-- Dynamo는 아직 live deploy 범위가 아니다. 현재 검증 범위는 resolver의 version normalize와 deployer의 remote release tag existence helper를 각각 독립적으로 검증하는 단계다.
+- Dynamo는 아직 end-to-end live deploy 범위가 아니다. 현재 구현 범위는 release checkout/chart path 준비, Dynamo platform Helm install command, user-provided Dynamo CR apply command까지다.
+- `DynamoReleaseSource`는 `DeployControlPlane()`에서 호출되며, release tag validation과 `.tmp/dynamo/<version>` checkout 준비를 담당한다.
+- `DeployEngine()`은 `engine.manifest`를 수정하지 않고 `kubectl apply -f <manifest>`로 그대로 적용한다.
+- `Teardown()`은 readiness/endpoint 미구현 단계에서 실패하더라도 partial deployment가 남지 않도록 CR delete, Helm uninstall, namespace delete/wait를 best-effort로 수행한다.
+- Dynamo production code는 기존 deployer 스타일과 맞추기 위해 `dynamo.go`와 `dynamo_release.go` 두 파일로 유지한다. command helper는 별도 파일로 분리하지 않는다.
 - Dynamo deployment fixture는 live deploy를 보장하는 축약 예제가 아니라, 제공된 reference `deploy_server_4p8d.yaml` 기반의 qwen3-32b round-robin 4P8D fixture다.
 
 제외:
