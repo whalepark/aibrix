@@ -14,13 +14,15 @@ brixbench/.tmp/dynamo-reference/Routing_Test_dynamo_1.2.0-ds-v4-dev3_vllm_0.21.0
 
 ## 핵심 결정
 
-- `provider: dynamo`는 `version`만 받는다.
+- `provider: dynamo`의 release source 입력은 `version`만 받는다.
 - `commit`, `localPath`, `controlplane`은 Dynamo provider에서 허용하지 않는다.
 - Dynamo release source of truth는 `https://github.com/ai-dynamo/dynamo`의 Git tag로 둔다.
-- 가능하면 단순 tag 존재 여부가 아니라 `main` branch에서 reachable한 tag인지 확인한다.
+- 단순 tag 존재 여부가 아니라 `release/<version>` branch와 같은 commit을 가리키는 tag인지 확인한다.
 - 기본 정책은 stable semver release tag만 허용한다.
 - dev, rc, post, vendor-specific tag는 기본 차단하고, 필요할 때 별도 opt-in 정책으로 확장한다.
-- node, registry, storage, network, image mirror, RDMA 같은 cluster-specific 설정은 Go 코드에 넣지 않고 사용자가 제공하는 YAML에 남긴다.
+- node, network, RDMA, runtime image 같은 workload-specific 설정은 Go 코드에 넣지 않고 사용자가 제공하는 DynamoGraphDeployment YAML에 남긴다.
+- 레퍼런스와 같은 기본 실행환경에 필요한 Dynamo platform values, model PV/PVC, MPI secret, PodMonitor best-effort 설정은 `provider: dynamo` 내부 기본 lifecycle로 처리한다. `platform.valuesFile`은 기본값을 덮어써야 할 때만 쓰는 선택적 override다.
+- `.tmp/dynamo-reference/...` 파일과 경로는 검증 증빙과 구현 참고용이다. brixbench에 들어가는 파일은 `.tmp` 밖의 upstream 가능한 경로에 새로 만든다.
 
 ## Release Tag 정책
 
@@ -79,21 +81,22 @@ v1.3.0-dev.1
 - stable mode에서는 `^v[0-9]+\.[0-9]+\.[0-9]+$`만 허용한다.
 - dev/rc/post tag는 별도 설정이 생기기 전까지 거부한다.
 
-main reachable 검증은 deploy 실행 단계에서 수행한다. resolver unit test가 네트워크에 의존하지 않도록, resolver는 형식과 provider 입력 조합만 검증한다.
+release branch 검증은 deploy 실행 단계에서 수행한다. resolver unit test가 네트워크에 의존하지 않도록, resolver는 형식과 provider 입력 조합만 검증한다.
 
 구현 후보:
 
 ```text
 git ls-remote --tags --refs https://github.com/ai-dynamo/dynamo.git
-git fetch --depth=1 origin main
-git fetch --depth=1 origin refs/tags/<version>:refs/tags/<version>
-git merge-base --is-ancestor <version> origin/main
+git fetch --filter=blob:none https://github.com/ai-dynamo/dynamo.git \
+  +refs/heads/release/1.2.1:refs/remotes/origin/release/1.2.1
+git rev-parse v1.2.1^{commit}
+git rev-parse refs/remotes/origin/release/1.2.1^{commit}
 ```
 
-실제 구현에서는 shallow fetch의 reachability 한계를 고려해야 한다. 우선순위는 다음과 같다.
+실제 구현에서는 upstream release branch/tag 운영 방식을 기준으로 한다. 우선순위는 다음과 같다.
 
 1. Network helper는 tag 존재 여부를 빠르게 확인한다.
-2. main reachability 확인은 가능한 환경에서만 수행하고, 실패 시 명확한 에러를 낸다.
+2. release branch와 tag commit 일치 확인은 가능한 환경에서만 수행하고, 실패 시 명확한 에러를 낸다.
 3. 테스트는 fake tag source를 주입해서 네트워크 없이 검증한다.
 
 ## Scenario 입력 형태
@@ -121,7 +124,20 @@ localPath: <path>      # 금지
 controlplane: [...]    # 금지
 ```
 
-`engine.manifest`는 사용자가 제공한 Dynamo CR YAML을 그대로 적용한다. brixbench는 CR 내부의 topology, image, routing mode, RDMA, PVC, nodeSelector 같은 세부 설정을 해석하거나 생성하지 않는다. 특정 클러스터에서만 의미가 있는 registry secret, storage path, PVC/PV, node affinity, toleration, CNI/RDMA annotation, image mirror 값도 provider 코드의 상수나 기본값으로 넣지 않는다.
+`engine.manifest`는 사용자가 제공한 Dynamo CR YAML을 그대로 적용한다. brixbench는 CR 내부의 topology, image, routing mode, RDMA, nodeSelector 같은 세부 설정을 해석하거나 생성하지 않는다. 레퍼런스 실행환경과 맞추기 위해 provider는 `models-pvc`, `mpi-run-ssh-secret`, 기본 platform values를 준비하지만, workload placement와 runtime tuning은 manifest에 남긴다.
+
+선택적 Dynamo platform 설정 override:
+
+```yaml
+provider: dynamo
+version: v1.2.1
+platform:
+  valuesFile: testdata/deployments/dynamo/platform-no-pvc.yaml
+engine:
+  manifest: testdata/deployments/dynamo/qwen3-8b-round-robin-1p1d-tp2.yaml
+```
+
+`platform.valuesFile`은 기본 provider values를 대체해 Helm platform chart에 넘길 사용자 제공 values 파일이다. 이 파일은 repository 안의 upstream 가능한 fixture 또는 사용자가 명시한 로컬 파일이어야 하며, `.tmp/dynamo-reference` 경로를 직접 참조하지 않는다.
 
 ## Deployer 책임 경계
 
@@ -140,7 +156,7 @@ Teardown
 
 각 단계의 책임:
 
-- `Initialize`: namespace, logDir, projectRoot, resolver에서 normalize된 version, engine manifest 경로를 저장한다.
+- `Initialize`: Dynamo 실행 namespace를 `brixbench-dynamo`로 고정하고, logDir, projectRoot, resolver에서 normalize된 version, engine manifest 경로를 저장한다.
 - `DeployControlPlane`: release version 기반으로 Dynamo platform을 설치한다.
 - `DeployGateway`: Dynamo에서는 별도 gateway deploy를 하지 않는 no-op이다. Dynamo Frontend service가 serving endpoint 역할을 한다.
 - `DeployEngine`: `engine.manifest`의 Dynamo CR을 `kubectl apply`로 적용한다.
@@ -154,7 +170,7 @@ Teardown
 레퍼런스의 `deploy_multi_prefix.sh`는 다음 흐름을 가진다.
 
 1. namespace 생성 및 기존 Dynamo resource cleanup
-2. registry secret 생성
+2. registry secret optional preflight/create
 3. Dynamo platform Helm install
 4. model PV/PVC 및 MPI secret 생성
 5. `DynamoGraphDeployment` 적용
@@ -167,9 +183,29 @@ Teardown
 
 brixbench에 반영할 범위:
 
-- 1, 3, 5, 6, 8, 10, 11은 deployer lifecycle에 맞춰 반영한다.
-- 2, 4, 7은 provider config나 별도 manifest hook이 생기기 전까지 최소화한다.
+- 1, 2, 3, 4, 5, 6, 7, 8, 10, 11은 deployer lifecycle에 맞춰 반영한다.
 - 9는 기존 benchmark driver 책임이므로 Dynamo deployer에 넣지 않는다.
+
+현재 실클러스터 기준으로 레퍼런스에서 반드시 반영해야 하는 배포 전제:
+
+- 플랫폼 설치는 `deploy/helm/charts/platform` 로컬 chart를 사용한다.
+- `DynamoGraphDeployment`를 적용하면 operator가 Frontend/worker 리소스를 materialize한다.
+- Gateway API 기반 배포가 아니라 Dynamo Frontend service가 serving endpoint 역할을 한다.
+- 현재 클러스터에는 기본 StorageClass가 없으므로 NATS JetStream PVC를 켜 둔 chart default로는 `nats-0`가 Pending 된다.
+- 따라서 provider 기본 platform values에는 `nats.config.jetstream.fileStore.pvc.enabled=false`가 포함된다.
+- 레퍼런스의 registry mirror, operator image, webhook, NATS 설정도 기본 실행환경에 필요한 범위만 provider 내부 values로 생성한다.
+
+현재 v1.2.1 platform chart 기준 Dynamo CRD는 다음 7개다. Gateway 관련 CRD는 기본 DGD/Frontend 경로의 필수 리소스가 아니라 별도 Gateway API/GAIE 모드에서 다룬다.
+
+```text
+dynamocheckpoints.nvidia.com
+dynamocomponentdeployments.nvidia.com
+dynamographdeploymentrequests.nvidia.com
+dynamographdeployments.nvidia.com
+dynamographdeploymentscalingadapters.nvidia.com
+dynamomodels.nvidia.com
+dynamoworkermetadatas.nvidia.com
+```
 
 ## 레퍼런스에서 바로 일반화하지 않을 부분
 
@@ -177,7 +213,7 @@ brixbench에 반영할 범위:
 
 - hard-coded node IP 또는 hostname
 - hard-coded registry credential
-- `/root/models`, `/data01/models` 같은 cluster-local path
+- benchmark client용 `/data01/models` 같은 cluster-local path
 - operator image를 직접 build/push하는 흐름
 - 특정 AIBrix mirror registry 전제
 - 특정 RDMA CNI annotation
@@ -185,7 +221,7 @@ brixbench에 반영할 범위:
 - routing test matrix batch runner
 - benchmark client pod YAML 자체 생성
 
-이 값들은 사용자가 제공하는 `engine.manifest` 또는 benchmark YAML에 남긴다. brixbench provider는 release 기반 platform 설치와 lifecycle orchestration만 책임진다. 클러스터별 값이 필요해지는 경우에도 Go 코드에 조건 분기나 hard-coded fallback을 추가하지 않고, 명시적인 YAML manifest 또는 향후 `platform.valuesFile` 같은 사용자 제공 hook으로만 전달한다.
+이 값들은 사용자가 제공하는 `engine.manifest` 또는 benchmark YAML에 남긴다. brixbench provider는 release 기반 platform 설치와 lifecycle orchestration, 레퍼런스 실행환경의 공통 전제 리소스 준비만 책임진다.
 
 ## Dynamo platform 설치 방식
 
@@ -204,19 +240,28 @@ deploy/helm/charts/platform
 
 초기 구현에서는 checkout 기반이 가장 명확하다. 단, 사용자 입력은 checkout path가 아니라 `version` 하나로 유지한다. 내부적으로만 version tag를 checkout한다.
 
+Helm 실행 원칙:
+
+- Helm 전역 상태(`~/.config/helm`, `~/.cache/helm`)를 직접 쓰지 않고 workspace-local isolated Helm state를 사용한다.
+- dependency repo를 준비한 뒤 `helm dependency build --skip-refresh`를 사용해 중복 remote index fetch를 줄인다.
+- benchmark namespace에 설치하는 release는 namespace별 이름을 써서 기존 cluster-wide Dynamo platform release와 소유권 충돌을 피한다.
+- 기존 cluster-wide operator가 있는 클러스터에서도 benchmark namespace 안에 설치할 수 있도록 operator namespace restriction을 켠다.
+- `platform.valuesFile`이 있으면 기본 provider values 대신 `helm upgrade --install ... -f <valuesFile>`로 전달한다.
+
 ## Version과 image tag 관계
 
-`version`은 Dynamo platform release version이다. runtime image tag까지 자동 파생하는 것은 1차 범위에서 제한적으로만 다룬다.
+`version`은 Dynamo platform release version이다. 기본 platform values의 operator image tag는 이 release version에서 `v` prefix를 제거해 파생한다. runtime image tag까지 자동 파생하는 것은 1차 범위에서 제한적으로만 다룬다.
 
 이유:
 
 - 레퍼런스의 `v1.2.0-deepseek-v4-dev.3` 같은 tag는 stable semver가 아니다.
 - runtime image는 vLLM version과 Dynamo flavor가 함께 들어간다.
-- operator image mirror 상태는 registry마다 다르다.
+- dev 또는 vendor-specific operator image가 필요하면 provider 기본값이 아니라 `platform.valuesFile` override로 명시해야 추적 가능하다.
 
 따라서 1차 구현 원칙은 다음과 같다.
 
 - platform install은 `version`에서 파생한다.
+- provider 기본 operator image tag도 `version`에서 파생한다. 예: `v1.2.1` -> `1.2.1`.
 - engine runtime image는 `engine.manifest` 안에 명시한다.
 - provider가 manifest 내부 image를 rewrite하지 않는다.
 - 나중에 image policy가 필요해지면 `dynamo.imagePolicy` 같은 명시적 config로 확장한다.
@@ -285,11 +330,18 @@ Teardown 순서:
 2. DynamoGraphDeployment finalizer 제거
 3. DynamoComponentDeployment finalizer 제거
 4. Dynamo CR 삭제
-5. non-platform deployment/service/replicaset/pod 삭제
+5. DynamoGraphDeployment/DynamoComponentDeployment delete wait
 6. Helm release uninstall
-7. 필요 시 PVC/PV cleanup
+7. 필요 시 PodMonitor/PVC/PV cleanup
+8. namespace delete/wait
 
 PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 생성한 PVC/PV만 삭제한다. 사용자 manifest가 만든 persistent resource는 owner label이 없으면 삭제하지 않는다.
+
+Cleanup error 정책:
+
+- critical cleanup은 실패를 aggregate해서 `Teardown()` error로 반환한다. 대상은 DynamoGraphDeployment finalizer patch/delete/wait, DynamoComponentDeployment finalizer patch/delete/wait, Helm uninstall, namespace delete/wait이다.
+- best-effort cleanup은 warning과 command log만 남기고 `Teardown()` error에는 포함하지 않는다. 대상은 fallback PodMonitor 삭제, PVC 삭제, PV claimRef release다.
+- runner는 Dynamo case에서 generic namespace reset 전에 stale Dynamo cleanup hook을 먼저 호출한다. 이전 run이 finalizer 때문에 namespace `Terminating`에 걸려도 다음 smoke가 복구 경로에 도달하도록 하기 위함이다.
 
 ## 코드 변경 계획
 
@@ -328,7 +380,7 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
   - `DeployGateway()`는 no-op으로 구현하되 lifecycle 호출이 성공하도록 유지한다.
   - `DeployEngine()`에서 user-provided `DynamoGraphDeployment` manifest를 그대로 apply한다.
   - Dynamo용 최소 command execution/logging helper도 이 파일 안에 둔다.
-  - `Teardown()`에서 applied CR, Helm release, benchmark namespace를 best-effort로 정리한다.
+  - `Teardown()`에서 applied CR, Helm release, benchmark namespace를 정리한다. critical cleanup 실패는 aggregate error로 반환하고, PodMonitor/PVC/PV release만 best-effort로 둔다.
   - cluster-specific 설정을 코드에서 생성하거나 보정하지 않는다. 필요한 값은 `engine.manifest` 또는 향후 명시적 values hook으로 전달한다.
   - `WaitForReady()`에서 Frontend/worker readiness를 필수 확인하고 OpenAI-compatible probe는 모델명을 확인할 수 있을 때 optional로 수행한다.
   - `GetGatewayEndpoint()`에서 Dynamo Frontend service URL을 반환한다.
@@ -346,28 +398,32 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
   - `PrepareRelease(ctx, projectRoot, version)`에서 `.tmp/dynamo/<version>` checkout과 `deploy/helm/charts/platform` chart path 확인을 수행한다.
   - 기존 checkout에 chart path가 있으면 clone을 생략하고 재사용한다.
   - 기존 checkout이 있지만 chart path가 없으면 자동 삭제/복구하지 않고 명확히 실패시킨다.
-  - 가능한 경우 main-reachable 검증은 같은 release 경계 안에서 별도 함수로 추가한다.
+  - 가능한 경우 release branch/tag commit 검증은 같은 release 경계 안에서 별도 함수로 추가한다.
   - unit test는 fake tag source나 fake command runner를 주입해 네트워크 없이 검증한다.
 - `internal/deployers/command_logs.go`
   - 현재 AIBrix receiver에 묶인 command log helper를 provider-neutral helper로 정리한다.
   - AIBrix와 Dynamo deployer가 같은 log format을 쓰되, provider-specific command builder는 각 deployer 파일에 둔다.
-- `internal/deployers/dynamo_discovery.go`
-  - Frontend service discovery, pod label discovery, component readiness helper를 둔다.
+- `internal/deployers/dynamo.go`
+  - Frontend service discovery, pod label discovery, component readiness helper를 작은 helper로 둔다.
   - label 기반 탐색을 우선하고, 필요 시 CR name 기반 fallback을 둔다.
 - `benchmark/runner_test.go`
   - `provider: dynamo`를 `NewDynamoDeployer()`에 연결한다.
+  - Dynamo case는 namespace reset 전에 stale namespace cleanup hook을 호출해 Dynamo CR finalizer를 먼저 제거한다.
   - `DeployControlPlane()`, `DeployGateway()`, `DeployEngine()`, `WaitForReady()` 순서로 lifecycle을 명시적으로 호출한다.
   - deployment setup 실패 시에도 초기화된 deployer가 있으면 teardown을 호출해 부분 배포 리소스가 남지 않게 한다.
   - Dynamo deployer는 `deployers.Config.TestCase.Version`에서 resolver가 normalize한 version을 읽는다.
   - benchmark driver는 기존처럼 provider와 분리해 유지한다.
 - `benchmark/testdata/scenarios/*.yaml`
   - `dynamo-hello-world.yaml`을 추가한다.
-  - scenario에는 `provider: dynamo`, `version`, `engine.manifest`, `benchmark`만 넣는다.
+  - scenario에는 `provider: dynamo`, `version`, `platform.valuesFile`, `engine.manifest`, `benchmark`를 넣는다.
   - `version: 1.2.1`이 resolver에서 `v1.2.1`로 normalize되는 경로는 resolver 테스트에서 검증한다.
 - `benchmark/testdata/deployments/dynamo/*.yaml`
   - `qwen3-32b-round-robin-4p8d.yaml` fixture를 추가한다.
   - `/brixbench/.tmp/dynamo-reference/Routing_Test_dynamo_1.2.0-ds-v4-dev3_vllm_0.21.0/deploy_server_4p8d.yaml`을 거의 그대로 가져온다.
   - 필요한 변경은 AIBrix smoke와 비교하기 쉬운 고정값으로 제한한다: `Qwen3-32B`, `qwen3-32b`, `round-robin`, `MAX_MODEL_LEN=40960`, `GPU_MEM_UTIL=0.90`, `TP=4`.
+  - 실제 smoke 검증용으로는 `qwen3-8b-round-robin-1p1d-tp2.yaml` fixture를 추가하고 `dynamo-hello-world.yaml`이 이 경로를 사용한다.
+  - live smoke fixture는 현재 대상 클러스터의 GPU memory 여유를 고려해 `MAX_MODEL_LEN=1024`, `GPU_MEM_UTIL=0.11`을 사용한다.
+  - 대상 mirror registry에 stable operator image `1.2.1`이 없어 `platform-aibrix-mirror-dev-operator.yaml` values override로 dev operator tag를 명시한다.
   - topology, image, PVC, nodeSelector 등 클러스터별 값은 manifest 안에 두고 deployer가 생성하지 않는다.
 - `internal/resolver/*_test.go`
   - provider input validation과 version normalization은 네트워크 없는 단위 테스트로 유지한다.
@@ -385,39 +441,70 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
   - [x] remote release tag existence 검증 helper
   - [x] reference 기반 DynamoGraphDeployment fixture 추가
   - [x] deployer lifecycle 연결
-  - [x] main reachable 검증
+  - [x] release branch/tag commit 검증
 - [x] deployer 단계의 tag source abstraction
 - [x] release checkout 또는 chart path 준비
+- [x] Helm chart dependency build
 - [x] Dynamo platform Helm install
+- [x] `platform.valuesFile` 입력 검증과 Helm `-f` 전달
+- [x] provider 기본 platform values 추가: registry mirror, operator image, NATS JetStream PVC disable
+- [x] provider 기본 operator image tag를 scenario `version`에서 파생
+- [x] 레퍼런스 실행환경 공통 리소스 준비: namespace, model PV/PVC, MPI secret, optional registry secret preflight/create
+- [x] PodMonitor label 및 fallback PodMonitor best-effort 적용
 - [x] user-provided Dynamo CR apply
-- Frontend service endpoint resolution
-- Frontend/worker 중심 basic readiness wait
-- 모델명을 확인할 수 있을 때만 OpenAI-compatible readiness probe
-- artifact capture
-- [x] minimal teardown: non-blocking CR delete와 best-effort finalizer cleanup 포함
+- [x] Frontend service endpoint resolution
+- [x] Frontend/worker 중심 basic readiness wait
+- [x] 모델명을 확인할 수 있을 때만 OpenAI-compatible readiness probe
+- [ ] artifact capture
+- [x] teardown: CR finalizer/delete/wait, fallback PodMonitor, Helm release, PVC/PV, namespace cleanup
+- [x] cleanup critical error aggregate 반환
+- [x] Dynamo stale namespace pre-reset cleanup hook
 - unit tests
 
 현재 진행상황:
 
 - AIBrix hello-world regression은 통과했다. benchmark는 100/100 successful이었고 `brixbench-adhoc` namespace cleanup까지 완료됐다.
-- Dynamo는 아직 end-to-end live deploy 범위가 아니다. 현재 구현 범위는 release checkout/chart path 준비, Dynamo platform Helm install command, user-provided Dynamo CR apply command까지다.
+- Dynamo artifact capture는 아직 남아 있다. 현재 구현 범위는 release checkout/chart path 준비, Helm chart dependency build, default platform values, 공통 전제 리소스, Dynamo platform Helm install, user-provided Dynamo CR apply, Kubernetes 상태 기반 endpoint/readiness, 모델 registration/inference probe까지다.
+- Dynamo live smoke는 통과했다. `dynamo-hello-world.yaml` 기준 benchmark는 20/20 successful requests였고, cleanup 후 `brixbench-dynamo` namespace는 삭제됐으며 model PV는 `Available` 상태로 돌아왔다.
+- live smoke에서 확인된 cluster-specific 조건은 세 가지다. 첫째, chart default의 NATS JetStream PVC는 대상 클러스터의 기본 StorageClass 부재와 맞지 않으므로 provider 기본 platform values에서 `nats.config.jetstream.fileStore.pvc.enabled=false`를 둔다. 둘째, mirror registry에는 stable operator image `1.2.1`이 없어 smoke scenario는 dev operator tag를 `platform.valuesFile`로 명시한다. 셋째, 현재 GPU memory 여유가 제한적이어서 qwen3-8b smoke fixture는 `MAX_MODEL_LEN=1024`, `GPU_MEM_UTIL=0.11`을 사용한다.
 - `DynamoReleaseSource`는 `DeployControlPlane()`에서 호출되며, release tag validation과 `.tmp/dynamo/<version>` checkout 준비를 담당한다.
 - `PrepareRelease()`는 기존 checkout을 재사용하더라도 upstream `repoURL`에서 exact tag를 force-fetch하고 worktree를 `<version>^{commit}`으로 `checkout/reset/clean`한 뒤 사용한다.
-- `PrepareRelease()`는 upstream `repoURL`에서 main history를 fetch하고 `<version>^{commit}`이 `refs/remotes/origin/main`의 ancestor인지 확인한다.
-- `DeployEngine()`은 `engine.manifest`를 수정하지 않고 `kubectl apply -f <manifest>`로 그대로 적용한다.
-- `Teardown()`은 readiness/endpoint 미구현 단계에서 실패하더라도 partial deployment가 남지 않도록 CR delete, Helm uninstall, namespace delete/wait를 best-effort로 수행한다.
+- `PrepareRelease()`는 upstream `repoURL`에서 `release/<version>` branch를 fetch하고 `<version>^{commit}`이 해당 release branch head와 같은 commit인지 확인한다.
+- `Initialize()`는 DynamoGraphDeployment metadata를 읽어 graph name, effective namespace, component names를 확정한다. Dynamo benchmark namespace는 `brixbench-dynamo`이며, manifest namespace가 있으면 이 namespace와 일치해야 한다.
+- `DeployEngine()`은 `engine.manifest`를 수정하지 않고 effective namespace 기준으로 `kubectl apply -n <namespace> -f <manifest>`를 수행한다.
+- `WaitForReady()`는 Frontend service 생성까지 poll하고, Frontend와 각 non-Frontend component별 pod 존재 및 Ready 상태를 Kubernetes 상태 기준으로 확인한 뒤, manifest에서 모델명을 추론할 수 있으면 `/v1/models`와 `/v1/completions` probe를 수행한다.
+- `GetGatewayEndpoint()`는 `nvidia.com/dynamo-component=Frontend` label service를 우선하고, 없으면 `<graphName>-frontend` service로 fallback해 cluster-local URL을 반환한다.
+- `Teardown()`은 effective namespace 기준으로 CR finalizer patch/delete/wait, Helm uninstall, namespace delete/wait 실패를 aggregate해서 반환한다. fallback PodMonitor delete, PVC cleanup, PV claimRef release는 best-effort로 유지한다.
+- runner는 Dynamo provider일 때 generic namespace reset 전에 `CleanupStaleDynamoNamespace()`를 호출해 이전 run의 finalizer 잔여 상태를 먼저 복구한다.
+- 기본 platform values의 operator image tag는 hard-coded dev tag가 아니라 scenario `version`에서 파생한다.
+- dev/operator mirror가 필요한 live smoke scenario는 `platform.valuesFile`로 override한다.
 - Dynamo production code는 기존 deployer 스타일과 맞추기 위해 `dynamo.go`와 `dynamo_release.go` 두 파일로 유지한다. command helper는 별도 파일로 분리하지 않는다.
-- Dynamo deployment fixture는 live deploy를 보장하는 축약 예제가 아니라, 제공된 reference `deploy_server_4p8d.yaml` 기반의 qwen3-32b round-robin 4P8D fixture다.
+- Dynamo deployment fixture는 제공된 reference `deploy_server_4p8d.yaml` 기반의 qwen3-32b round-robin 4P8D fixture를 보존한다. 실제 smoke scenario는 더 작은 qwen3-8b round-robin 1P1D TP=2 fixture를 사용한다.
+
+## 지금 해야 할 작업
+
+1. [x] resolver/scenario schema에 Dynamo `platform.valuesFile`을 추가한다.
+2. [x] `platform.valuesFile` 경로 검증을 추가한다. `.tmp/dynamo-reference` 직접 참조는 금지하고, missing file은 명확히 실패시킨다.
+3. [x] `DynamoDeployer` config에 platform values file 경로를 전달한다.
+4. [x] `DeployControlPlane()`에서 values file이 있으면 Helm install에 `-f <valuesFile>`을 추가한다.
+5. [x] provider 기본 platform values를 추가한다.
+6. [x] `dynamo-hello-world.yaml` smoke scenario가 필요한 cluster-specific platform override를 명시하게 한다.
+7. [x] 단위 테스트를 추가/수정한다.
+   - resolver가 `platform.valuesFile`을 parse/validate하는지
+   - deployer가 Helm command에 `-f`를 넣는지
+   - missing values file과 `.tmp/dynamo-reference` 직접 참조를 거부하는지
+8. [x] live smoke를 다시 실행한다.
+   - 결과: 20/20 successful requests, cleanup 후 namespace 삭제, model PV `Available`
 
 제외:
 
 - Dynamo CR 생성기
 - runtime image 자동 생성/치환
-- cluster-specific registry secret 생성
+- hard-coded registry credential 저장
 - operator image build/push
 - RDMA/NIXL tuning 자동화
 - benchmark matrix runner
-- PodMonitor/VMP 자동 설정
+- benchmark client pod YAML 생성
 - dev/rc/post tag 기본 허용
 
 ## 추후 확장 포인트
@@ -432,4 +519,4 @@ PVC/PV 삭제는 위험할 수 있으므로 초기 구현에서는 brixbench가 
 
 ## 결론
 
-`provider: dynamo`는 AIBrix와 동일한 deployer lifecycle에 들어가되, 입력 표면은 `version`과 `engine.manifest`로 제한한다. Dynamo release 판정은 `ai-dynamo/dynamo`의 main-reachable tag를 기준으로 삼고, resolver는 네트워크 없는 입력 검증만 담당한다. 레퍼런스 배포 환경은 Dynamo 1.x의 실제 platform 설치, CR 적용, readiness, cleanup 순서를 확인하는 자료로 사용하되, 클러스터별 값과 benchmark matrix는 brixbench core에 넣지 않는다.
+`provider: dynamo`는 AIBrix와 동일한 deployer lifecycle에 들어가되, 입력 표면은 `version`과 `engine.manifest`로 제한한다. Dynamo release 판정은 `ai-dynamo/dynamo`의 stable tag와 `release/<version>` branch가 같은 commit을 가리키는지를 기준으로 삼고, resolver는 네트워크 없는 입력 검증만 담당한다. 레퍼런스 배포 환경은 Dynamo 1.x의 실제 platform 설치, CR 적용, readiness, cleanup 순서를 확인하는 자료로 사용하되, 클러스터별 값과 benchmark matrix는 brixbench core에 넣지 않는다.
