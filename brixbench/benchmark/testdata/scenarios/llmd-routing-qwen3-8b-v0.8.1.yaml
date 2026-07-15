@@ -11,3 +11,14 @@ Tests:
     type: vllm
     manifest: testdata/deployments/llmd/models/qwen3-8b-pd-4p4d.yaml
   benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-llmd-pd-4p4d-r8.yaml
+- name: lat-tc-rt-02-llmd-pd-4p8d-r8
+  provider: llmd
+  version: v0.8.1
+  controlplane:
+  - testdata/deployments/llmd/router/base-values.yaml
+  - testdata/deployments/llmd/router/policies/pd-disaggregation-official.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/llmd/models/qwen3-8b-pd-4p8d.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-llmd-pd-4p8d-r8.yaml
+
