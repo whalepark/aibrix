@@ -55,6 +55,8 @@ spec:
                   env:
                     - name: UCX_TLS
                       value: "^gga"
+                    - name: UCX_NET_DEVICES
+                      value: "eth1"
                     - name: GLOO_SOCKET_IFNAME
                       value: "eth0"
                     - name: NCCL_SOCKET_IFNAME
@@ -159,6 +161,8 @@ spec:
                   env:
                     - name: UCX_TLS
                       value: "^gga"
+                    - name: UCX_NET_DEVICES
+                      value: "eth1"
                     - name: GLOO_SOCKET_IFNAME
                       value: "eth0"
                     - name: NCCL_SOCKET_IFNAME
