@@ -1,0 +1,12 @@
+# Dynamo + vLLM Qwen3-8B PD routing (4p8d) at 8 rps / 32 concurrency.
+Scenario: dynamo-routing-qwen3-8b-4p8d
+Tests:
+  - name: dynamo-v1.2.0-qwen3-8b-round-robin-4p8d-r8
+    provider: dynamo
+    version: 1.2.1
+    platform:
+      valuesFile: testdata/deployments/dynamo/platform-aibrix-mirror-dev-operator.yaml
+    engine:
+      type: vllm
+      manifest: testdata/deployments/dynamo/qwen3-8b-round-robin-4p8d.yaml
+    benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-dynamo-pd-4p8d-r8.yaml

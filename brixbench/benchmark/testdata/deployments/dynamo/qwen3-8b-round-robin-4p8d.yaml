@@ -1,0 +1,223 @@
+# vLLM Disaggregated Serving (4P8D) - Dynamo CRD
+#
+# Purpose: Qwen3-8B with 4 Prefill + 8 Decode (TP=1) on Dynamo for multinode
+#          RDMA / NIXL routing validation (brixbench parity with AIBrix 4p8d).
+# Usage:   kubectl apply -n brixbench-dynamo -f qwen3-8b-round-robin-4p8d.yaml
+#
+# Node layout (aligned with AIBrix qwen3-8b-pd-4p8d.yaml):
+#   - Prefill (4) + Frontend: 192.168.0.7
+#   - Decode (8):             192.168.0.6
+#
+# Config base: brixbench dynamo qwen3-8b 1p1d-tp2 env/image style, scaled to
+# 4p8d TP=1 with routing-sized MAX_MODEL_LEN / GPU_MEM_UTIL from the cluster
+# Routing_Test_dynamo 4p8d fixture. UCX_NET_DEVICES=eth1 pins the RDMA CNI
+# secondary interface inside each worker pod.
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-dynamo
+spec:
+  backendFramework: vllm
+  pvcs:
+    - name: models-pvc
+      create: false
+
+  services:
+    Frontend:
+      dynamoNamespace: vllm-dynamo
+      componentType: frontend
+      replicas: 1
+      volumeMounts:
+        - name: models-pvc
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          kubernetes.io/hostname: "192.168.0.7"
+        mainContainer:
+          image: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/ai-dynamo-vllm-runtime:1.2.0
+          workingDir: /workspace
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              export MODEL=Qwen3-8B
+              export ROUTER_MODE=round-robin
+              python3 -m dynamo.frontend \
+                --model-path /models/$MODEL \
+                --router-mode $ROUTER_MODE \
+                --router-reset-states
+
+    VllmDecodeWorker:
+      dynamoNamespace: vllm-dynamo
+      componentType: worker
+      subComponentType: decode
+      replicas: 8
+      extraPodMetadata:
+        annotations:
+          k8s.volcengine.com/pod-networks: |
+            [{"cniConf":{"name":"rdma"}}]
+      resources:
+        limits:
+          gpu: "1"
+          custom:
+            "vke.volcengine.com/rdma": "1"
+        requests:
+          gpu: "1"
+          custom:
+            "vke.volcengine.com/rdma": "1"
+      volumeMounts:
+        - name: models-pvc
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          kubernetes.io/hostname: "192.168.0.6"
+        mainContainer:
+          image: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/ai-dynamo-vllm-runtime:1.2.0
+          workingDir: /workspace
+          command:
+            - /bin/sh
+            - -c
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add:
+                - IPC_LOCK
+                - SYS_RESOURCE
+          args:
+            - |
+              ulimit -l unlimited
+              export NIXL_PLUGIN_DIR=/opt/nvidia/nvda_nixl/lib64/plugins
+              export LD_LIBRARY_PATH=/opt/nvidia/nvda_nixl/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+              export PATH=$PATH:/usr/local/nvidia/bin:/usr/local/nvidia/lib64
+              /sbin/ldconfig
+              export MODEL=Qwen3-8B
+              export SERVED_MODEL_NAME=qwen3-8b
+              export MAX_MODEL_LEN=16384
+              export GPU_MEM_UTIL=0.90
+              export TP=1
+              python3 -m dynamo.vllm \
+                --model /models/$MODEL \
+                --served-model-name $SERVED_MODEL_NAME \
+                --max-model-len $MAX_MODEL_LEN \
+                --gpu-memory-utilization $GPU_MEM_UTIL \
+                --tensor-parallel-size $TP \
+                --disaggregation-mode decode \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+          env:
+            - name: DYN_LOG
+              value: "info"
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+            - name: UCX_NET_DEVICES
+              value: "eth1"
+            - name: UCX_TLS
+              value: "rc_x,rc,cuda_copy,cuda_ipc,tcp"
+            - name: UCX_IB_ADDR_TYPE
+              value: "eth"
+            - name: UCX_RNDV_SCHEME
+              value: "get_zcopy"
+            - name: UCX_RNDV_THRESH
+              value: "0"
+            - name: UCX_MEMTYPE_CACHE
+              value: "n"
+            - name: GLOO_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_IB_DISABLE
+              value: "0"
+            - name: NCCL_IB_GID_INDEX
+              value: "7"
+
+    VllmPrefillWorker:
+      dynamoNamespace: vllm-dynamo
+      componentType: worker
+      subComponentType: prefill
+      replicas: 4
+      extraPodMetadata:
+        annotations:
+          k8s.volcengine.com/pod-networks: |
+            [{"cniConf":{"name":"rdma"}}]
+      resources:
+        limits:
+          gpu: "1"
+          custom:
+            "vke.volcengine.com/rdma": "1"
+        requests:
+          gpu: "1"
+          custom:
+            "vke.volcengine.com/rdma": "1"
+      volumeMounts:
+        - name: models-pvc
+          mountPoint: /models
+      extraPodSpec:
+        nodeSelector:
+          kubernetes.io/hostname: "192.168.0.7"
+        mainContainer:
+          image: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/ai-dynamo-vllm-runtime:1.2.0
+          workingDir: /workspace
+          command:
+            - /bin/sh
+            - -c
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add:
+                - IPC_LOCK
+                - SYS_RESOURCE
+          args:
+            - |
+              ulimit -l unlimited
+              export NIXL_PLUGIN_DIR=/opt/nvidia/nvda_nixl/lib64/plugins
+              export LD_LIBRARY_PATH=/opt/nvidia/nvda_nixl/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+              export PATH=$PATH:/usr/local/nvidia/bin:/usr/local/nvidia/lib64
+              /sbin/ldconfig
+              export MODEL=Qwen3-8B
+              export SERVED_MODEL_NAME=qwen3-8b
+              export MAX_MODEL_LEN=16384
+              export GPU_MEM_UTIL=0.90
+              export TP=1
+              python3 -m dynamo.vllm \
+                --model /models/$MODEL \
+                --served-model-name $SERVED_MODEL_NAME \
+                --max-model-len $MAX_MODEL_LEN \
+                --gpu-memory-utilization $GPU_MEM_UTIL \
+                --tensor-parallel-size $TP \
+                --disaggregation-mode prefill \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}' \
+                --kv-events-config '{"publisher":"zmq","topic":"kv-events","endpoint":"tcp://*:20080","enable_kv_cache_events":true}'
+          env:
+            - name: DYN_LOG
+              value: "info"
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: CUDA_VISIBLE_DEVICES
+              value: "0"
+            - name: UCX_NET_DEVICES
+              value: "eth1"
+            - name: UCX_TLS
+              value: "rc_x,rc,cuda_copy,cuda_ipc,tcp"
+            - name: UCX_IB_ADDR_TYPE
+              value: "eth"
+            - name: UCX_RNDV_SCHEME
+              value: "get_zcopy"
+            - name: UCX_RNDV_THRESH
+              value: "0"
+            - name: UCX_MEMTYPE_CACHE
+              value: "n"
+            - name: GLOO_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_SOCKET_IFNAME
+              value: "eth0"
+            - name: NCCL_IB_DISABLE
+              value: "0"
+            - name: NCCL_IB_GID_INDEX
+              value: "7"
