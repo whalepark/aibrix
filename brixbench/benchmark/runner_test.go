@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/vllm-project/aibrix/brixbench/internal/deployers"
 	"github.com/vllm-project/aibrix/brixbench/internal/drivers"
@@ -95,6 +96,9 @@ func executeScenarioTestCase(t *testing.T, scenarioName string, scenarioLogRoot 
 	result.BenchmarkKind = testCase.BenchmarkKind
 	benchmarkNamespace := benchmarkNamespaceForTestCase(testCase)
 	caseLogDir := caseLogRoot(scenarioLogRoot, testCase.Name)
+	if err := stagePublishInputs(caseLogDir, testCase); err != nil {
+		t.Logf("Warning: failed to stage publish inputs for %s: %v", testCase.Name, err)
+	}
 
 	if testCase.ProviderName() == "dynamo" {
 		staleCleanupDone := progressStep(t, "clear stale Dynamo resources in namespace %s for %s", benchmarkNamespace, testCase.Name)
@@ -320,13 +324,15 @@ func TestAIBrixBenchmarkSuite(t *testing.T) {
 	}
 
 	progressLog(t, "Running Scenario: %s", scenario.Name)
-	runStartedAt := nowInUTC()
-	runID := formatScenarioRunID(runStartedAt, scenario.Name)
+	runStartedAt := time.Now().In(benchmarkLocation())
+	runID := uniqueScenarioRunID("testdata/logs", runStartedAt, scenario.Name)
 	scenarioLogRoot := filepath.Join("testdata/logs", runID)
+	clearSuiteProgressLog := setSuiteProgressLog(filepath.Join(scenarioLogRoot, "brixbench.log"))
+	defer clearSuiteProgressLog()
 	progressLog(t, "Suite log root for %s: %s", scenario.Name, scenarioLogRoot)
 	resultsByCase := runScenarioTests(t, scenario, scenarioLogRoot, exporter)
 	summary := buildScenarioSummary(scenario.Name, resultsByCase)
-	if writeErr := writeScenarioArtifacts(scenarioLogRoot, runID, summary); writeErr != nil {
+	if writeErr := writeScenarioArtifacts(scenarioLogRoot, runID, summary, runStartedAt); writeErr != nil {
 		t.Fatalf("failed to write scenario artifacts: %v", writeErr)
 	}
 	progressLog(t, "Wrote scenario summary: %s", scenarioLogRoot)
@@ -341,5 +347,8 @@ func TestAIBrixBenchmarkSuite(t *testing.T) {
 		progressLog(t, "Generated scenario figures under %s/figures", scenarioLogRoot)
 	} else {
 		progressLog(t, "Skipped scenario figure generation because the benchmark kind was mixed/unsupported or .venv/bin/python or plot_summary_vllm_bench.py was not available")
+	}
+	if publishErr := maybePublishScenarioArtifacts(t, scenario, scenarioPath, scenarioLogRoot, runID, runStartedAt, summary); publishErr != nil {
+		t.Fatal(publishErr)
 	}
 }
