@@ -14,7 +14,8 @@ Tests:
   gateway:
     image:
       baseImage: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/gateway-plugins:v0.6.0
-      outputRepository: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/gateway-plugins
+      # Push rebuilt gateway to the writable internal registry (devbox creds).
+      outputRepository: aibrix-container-registry-cn-beijing.cr.volces.com/aibrix/gateway-plugins
     env:
       ROUTING_ALGORITHM: pd
       AIBRIX_PREFIX_CACHE_BLOCK_SIZE: 512
