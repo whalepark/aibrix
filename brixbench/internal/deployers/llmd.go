@@ -259,6 +259,22 @@ func (d *LLMdDeployer) ensureLLMdImagePullSecret(ctx context.Context) (bool, err
 	username := strings.TrimSpace(os.Getenv("LLMD_REGISTRY_USERNAME"))
 	password := os.Getenv("LLMD_REGISTRY_PASSWORD")
 	if username == "" && password == "" {
+		// Fall back to local docker config (devbox tosutil / registry login).
+		dockerConfig := filepath.Join(os.Getenv("HOME"), ".docker", "config.json")
+		if _, statErr := os.Stat(dockerConfig); statErr == nil {
+			command := fmt.Sprintf(
+				"kubectl create secret docker-registry %s --docker-server=%s --from-file=.dockerconfigjson=%s -n %s --dry-run=client -o yaml | kubectl apply -f -",
+				shellQuote(llmdRegistrySecretName),
+				shellQuote(llmdRegistryServer),
+				shellQuote(dockerConfig),
+				shellQuote(d.namespace),
+			)
+			if err := d.runLLMdCommand(ctx, "create-llmd-registry-secret-from-dockerconfig", "bash", "-lc", command); err != nil {
+				fmt.Printf("Warning: failed to create LLM-d image pull secret %s from docker config: %v\n", llmdRegistrySecretName, err)
+				return false, nil
+			}
+			return true, nil
+		}
 		fmt.Printf("Warning: LLM-d image pull secret %s is missing in namespace %s; continuing without imagePullSecrets\n", llmdRegistrySecretName, d.namespace)
 		return false, nil
 	}
