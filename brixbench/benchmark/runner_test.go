@@ -362,14 +362,17 @@ func TestAIBrixBenchmarkSuite(t *testing.T) {
 	generatedFigures, skipReason, figureErr := generateScenarioFigures(scenarioLogRoot, summary)
 	figuresDone()
 	if figureErr != nil {
-		t.Fatalf("failed to generate scenario figures: %v", figureErr)
-	}
-	if generatedFigures {
+		// Do not abort before TOS publish — failed/partial runs should still append CSV.
+		progressLog(t, "Warning: failed to generate scenario figures: %v", figureErr)
+	} else if generatedFigures {
 		progressLog(t, "Generated scenario figures under %s/figures", scenarioLogRoot)
 	} else {
 		progressLog(t, "Warning: skipped scenario figure generation: %s", skipReason)
 	}
 	if publishErr := maybePublishScenarioArtifacts(t, scenario, scenarioPath, scenarioLogRoot, runID, runStartedAt, summary); publishErr != nil {
 		t.Fatal(publishErr)
+	}
+	if figureErr != nil {
+		t.Errorf("failed to generate scenario figures: %v", figureErr)
 	}
 }
