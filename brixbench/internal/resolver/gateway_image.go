@@ -35,6 +35,24 @@ func PrepareGatewayImage(ctx context.Context, projectRoot string, test *Test) (*
 	if test.ProviderName() != "aibrix" {
 		return nil, nil
 	}
+	// CI / smoke: skip docker build/push and roll out an already-published image.
+	// Example: BENCHMARK_GATEWAY_IMAGE=aibrix-public-release-cn-beijing.cr.volces.com/aibrix/gateway-plugins:v0.6.0-52405d78-benchmark
+	if img := strings.TrimSpace(os.Getenv("BENCHMARK_GATEWAY_IMAGE")); img != "" {
+		repository, tag, err := splitImageRef(img)
+		if err != nil {
+			return nil, fmt.Errorf("invalid BENCHMARK_GATEWAY_IMAGE %q: %w", img, err)
+		}
+		image := &GatewayImage{
+			Image:      img,
+			Repository: repository,
+			Tag:        tag,
+		}
+		test.GatewayImage = image.Image
+		test.GatewayImageRepository = image.Repository
+		test.GatewayImageTag = image.Tag
+		fmt.Printf("Using prebuilt gateway image from BENCHMARK_GATEWAY_IMAGE: %s\n", img)
+		return image, nil
+	}
 	if test.WorkspacePath == "" || test.ResolvedCommit == "" {
 		return nil, nil
 	}
