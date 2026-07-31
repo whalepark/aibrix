@@ -1,15 +1,12 @@
 # build gateway plugins
 ARG BUILDER_IMAGE=golang:1.22
 ARG RUNTIME_IMAGE=gcr.io/distroless/base-debian12:nonroot
-ARG GOPROXY=https://proxy.golang.org,direct
 ARG TARGETPLATFORM
 
 # Build the manager binary
 FROM ${BUILDER_IMAGE} AS builder
 ARG TARGETOS
 ARG TARGETARCH
-ARG GOPROXY
-ENV GOPROXY=${GOPROXY}
 
 WORKDIR /workspace
 
