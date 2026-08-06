@@ -24,8 +24,7 @@
 # Usage:   kubectl apply -n brixbench-dynamo -f qwen3-8b-round-robin-1p1d-tp2-vke.yaml
 #
 # This VKE fixture intentionally keeps cluster-specific values in YAML, not in
-# the Go deployer: PVC, PodMonitor labels, image, nodeSelector, RDMA annotation,
-# and UCX/NIXL env.
+# the Go deployer: PVC, image, nodeSelector, RDMA annotation, and UCX/NIXL env.
 
 apiVersion: v1
 kind: PersistentVolume
@@ -52,50 +51,6 @@ spec:
       storage: 500Gi
   volumeName: models-pv-brixbench-dynamo
   storageClassName: ""
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: dynamo-vllm-worker-metrics
-  labels:
-    volcengine.vmp: "true"
-spec:
-  podMetricsEndpoints:
-    - interval: 15s
-      path: /metrics
-      port: system
-      honorLabels: true
-      relabelings:
-        - action: replace
-          replacement: dynamo-vllm-worker
-          targetLabel: job
-  selector:
-    matchExpressions:
-      - key: nvidia.com/dynamo-component
-        operator: In
-        values:
-          - VllmDecodeWorker
-          - VllmPrefillWorker
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: dynamo-vllm-frontend-metrics
-  labels:
-    volcengine.vmp: "true"
-spec:
-  podMetricsEndpoints:
-    - interval: 15s
-      path: /metrics
-      port: http
-      honorLabels: true
-      relabelings:
-        - action: replace
-          replacement: dynamo-vllm-frontend
-          targetLabel: job
-  selector:
-    matchLabels:
-      nvidia.com/dynamo-component: Frontend
 ---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment

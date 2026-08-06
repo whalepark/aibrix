@@ -17,6 +17,9 @@ dynamo-operator:
     certManager:
       enabled: false
   dynamo:
+    metrics:
+      podMonitors:
+        enabled: false
     mpiRun:
       secretName: "mpi-run-ssh-secret"
   discoveryBackend: kubernetes
