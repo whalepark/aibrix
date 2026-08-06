@@ -195,6 +195,8 @@ spec:
           env:
             - name: DYN_LOG
               value: "info"
+            - name: DYN_HEALTH_CHECK_ENABLED
+              value: "false"
             - name: TRANSFORMERS_OFFLINE
               value: "1"
             - name: HF_HUB_OFFLINE
@@ -286,6 +288,8 @@ spec:
           env:
             - name: DYN_LOG
               value: "info"
+            - name: DYN_HEALTH_CHECK_ENABLED
+              value: "false"
             - name: TRANSFORMERS_OFFLINE
               value: "1"
             - name: HF_HUB_OFFLINE
