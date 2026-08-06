@@ -10,7 +10,8 @@
 #
 # Runtime is the official Dynamo v1.3.1 image mirrored to the internal registry.
 # It contains vLLM 0.23.0, CUDA 13.0, and NIXL 1.1.0.
-# Preserve the image-provided NIXL_PLUGIN_DIR (/opt/dynamo/nixl/plugins).
+# Preserve the image-provided NIXL_PLUGIN_DIR and LD_LIBRARY_PATH. Prepending
+# host library paths bypasses CUDA 13 compatibility on the VKE 575 driver.
 # UCX_NET_DEVICES is auto-detected per pod at startup (ucx_info -d): the VKE
 # RDMA CNI wires a different HCA (mlx5_0..7) into each pod, so a static pin
 # either silently falls back to TCP (KV transfer ~1s TTFT floor) or crashes.
@@ -171,7 +172,6 @@ spec:
           args:
             - |
               ulimit -l unlimited
-              export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
               RDMA_DEV=$(ucx_info -d 2>/dev/null | sed -n 's/.*Device: \(mlx5_[0-9]*:1\).*/\1/p' | sort -u | head -1)
               if [ -n "$RDMA_DEV" ]; then
                 export UCX_NET_DEVICES="${RDMA_DEV},eth1"
@@ -262,7 +262,6 @@ spec:
           args:
             - |
               ulimit -l unlimited
-              export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
               RDMA_DEV=$(ucx_info -d 2>/dev/null | sed -n 's/.*Device: \(mlx5_[0-9]*:1\).*/\1/p' | sort -u | head -1)
               if [ -n "$RDMA_DEV" ]; then
                 export UCX_NET_DEVICES="${RDMA_DEV},eth1"
