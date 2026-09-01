@@ -11,6 +11,8 @@ Model files are expected to already exist on the test cluster under
 The llm-d Brixbench testdata uses internal registry image names. If an image is
 missing, mirror the matching upstream image before running the smoke benchmark.
 
+### v0.8.1
+
 Modelserver image:
 
 - Source: `guides/recipes/modelserver/components/images/gpu-vllm`
@@ -32,21 +34,41 @@ Router/EPP image:
 - Upstream Envoy image: `docker.io/envoyproxy/envoy:distroless-v1.33.2`
 - Brixbench Envoy image: `aibrix-public-release-cn-beijing.cr.volces.com/aibrix/envoyproxy-envoy:distroless-v1.33.2`
 
+### v0.9.0
+
+Modelserver image:
+
+- Source: `guides/recipes/modelserver/components/images/gpu-vllm/release` (tag `v0.9.0`)
+- Upstream image: `vllm/vllm-openai:v0.26.0`
+- Brixbench image: `aibrix-public-release-cn-beijing.cr.volces.com/aibrix/llmd-vllm-openai:v0.26.0`
+
+Routing sidecar image:
+
+- Source: `guides/recipes/modelserver/components/images/routing-sidecar/release` (tag `v0.9.0`)
+- Upstream image: `ghcr.io/llm-d/llm-d-router-disagg-sidecar:v0.10.0`
+- Brixbench image: `aibrix-public-release-cn-beijing.cr.volces.com/aibrix/llmd-router-disagg-sidecar:v0.10.0`
+
+Router/EPP image:
+
+- Source: `oci://ghcr.io/llm-d/charts/llm-d-router-standalone`
+- Chart version: `v0.10.0`
+- Upstream EPP image: `ghcr.io/llm-d/llm-d-router-endpoint-picker:v0.10.0`
+- Brixbench EPP image: `aibrix-public-release-cn-beijing.cr.volces.com/aibrix/llm-d-router-endpoint-picker:v0.10.0`
+- Upstream Envoy image: `docker.io/envoyproxy/envoy:distroless-v1.33.2`
+- Brixbench Envoy image: `aibrix-public-release-cn-beijing.cr.volces.com/aibrix/envoyproxy-envoy:distroless-v1.33.2`
+
 ## Scenario `version` vs router chart version
 
-These are intentionally separate pins for the smoke path:
+Scenario YAML `version` is the **llm-d git release tag**. The deployer
+validates that tag with `git ls-remote` against
+`https://github.com/llm-d/llm-d.git` (no local llm-d checkout / `LLMD_REPO`
+required) and selects the matching standalone router chart:
 
-- Scenario YAML `version` (for example `v0.8.1`) is the **llm-d git release
-  tag**. The deployer validates that tag with `git ls-remote` against
-  `https://github.com/llm-d/llm-d.git` (no local llm-d checkout / `LLMD_REPO`
-  required). It does **not** select the Helm chart version.
-- The standalone router chart is pinned in the deployer as
-  `llmdRouterChartVersion` (`v0.9.0` today), matching the Images section above
-  and `router/base-values.yaml`.
+- `v0.8.1` → chart `v0.9.0` and `router/base-values.yaml`
+- `v0.9.0` and later → chart `v0.10.0` and `router/base-values-v0.9.0.yaml`
 
-Supporting arbitrary chart versions from scenario YAML is out of scope for this
-smoke fixture; bump the deployer constant (and matching images/values) together
-when upgrading the router stack.
+Keep version-specific fixtures separate. Do not change v0.8.1 files when
+adding a newer llm-d release.
 
 ## Engine deployment name contract
 
@@ -63,21 +85,26 @@ name discovery is not supported yet.
 
 ## Routing Policy
 
-The checked-in llm-d scenario uses the upstream llm-d v0.8.1 P/D
-disaggregation **cache-plus-load** policy:
+v0.8.1 uses the upstream cache-plus-load policy:
 
 ```text
 brixbench/benchmark/testdata/deployments/llmd/router/policies/pd-disaggregation-official.yaml
 ```
 
-It keeps prefill and decode endpoints separate and uses the Endpoint Picker
-(EPP) default `max-score-picker` with cache and load signals:
-
 - prefill: prefix-cache (weight 3), queue (2), KV-cache utilization (2)
 - decode: active requests (2), prefix-cache (3)
 
+v0.9.0 uses the upstream token-based P/D policy:
+
+```text
+brixbench/benchmark/testdata/deployments/llmd/router/policies/pd-disaggregation-official-v0.9.0.yaml
+```
+
+- prefill: prefix-cache affinity filter, token-load scorer, max-score picker
+- decode: active-request scorer, max-score picker
+
 The policy is selected by the scenario's ordered `controlplane` Helm values
-files:
+files. v0.8.1:
 
 ```yaml
 controlplane:

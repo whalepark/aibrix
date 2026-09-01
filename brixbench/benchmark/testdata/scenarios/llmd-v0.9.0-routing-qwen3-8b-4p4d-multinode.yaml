@@ -1,0 +1,28 @@
+# llm-d v0.9.0 + vLLM 0.26.0 Qwen3-8B PD routing.
+# Official release: https://github.com/llm-d/llm-d/releases/tag/v0.9.0
+# Multi-node 4p4d at 8/16 rps with 1000 prompts; TOS publishing is controlled
+# externally and must remain disabled for validation runs.
+# RATE/PROMPTS match the 4p4d singlenode compare scenario for direct
+# singlenode vs multinode comparison.
+Scenario: llmd-v0.9.0-routing-qwen3-8b-4p4d-multinode
+Tests:
+- name: llmd-v0.9.0-pd-4p4d-multinode-r8
+  provider: llmd
+  version: v0.9.0
+  controlplane:
+  - testdata/deployments/llmd/router/base-values-v0.9.0.yaml
+  - testdata/deployments/llmd/router/policies/pd-disaggregation-official-v0.9.0.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/llmd/models/qwen3-8b-pd-4p4d-multinode-v0.9.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r8-p1000.yaml
+- name: llmd-v0.9.0-pd-4p4d-multinode-r16
+  provider: llmd
+  version: v0.9.0
+  controlplane:
+  - testdata/deployments/llmd/router/base-values-v0.9.0.yaml
+  - testdata/deployments/llmd/router/policies/pd-disaggregation-official-v0.9.0.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/llmd/models/qwen3-8b-pd-4p4d-multinode-v0.9.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r16-p1000.yaml
