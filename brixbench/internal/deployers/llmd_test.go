@@ -112,3 +112,62 @@ func TestInstallLLMdRouterDisablesEPPMetricsAuth(t *testing.T) {
 	}
 	t.Fatalf("expected Helm args to disable EPP metrics auth, got %v", args)
 }
+
+func TestLLMdRouterChartVersionFor(t *testing.T) {
+	tests := []struct {
+		version string
+		want    string
+	}{
+		{version: "v0.8.1", want: llmdRouterChartVersion},
+		{version: "0.8.1", want: llmdRouterChartVersion},
+		{version: "v0.9.0", want: llmdRouterChartVersionV010},
+		{version: "0.9.0", want: llmdRouterChartVersionV010},
+		{version: "v0.10.0", want: llmdRouterChartVersionV010},
+		{version: "v1.0.0", want: llmdRouterChartVersionV010},
+		{version: "", want: llmdRouterChartVersion},
+		{version: "main", want: llmdRouterChartVersion},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := llmdRouterChartVersionFor(tt.version); got != tt.want {
+				t.Fatalf("llmdRouterChartVersionFor(%q) = %q, want %q", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInstallLLMdRouterUsesChartVersionForRelease(t *testing.T) {
+	tests := []struct {
+		version string
+		want    string
+	}{
+		{version: "v0.8.1", want: llmdRouterChartVersion},
+		{version: "v0.9.0", want: llmdRouterChartVersionV010},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			runner := &fakeCommandRunner{}
+			deployer := &LLMdDeployer{
+				namespace:   LLMdBenchmarkNamespace,
+				projectRoot: t.TempDir(),
+				version:     tt.version,
+				runner:      runner,
+			}
+			if err := deployer.installLLMdRouter(context.Background()); err != nil {
+				t.Fatalf("installLLMdRouter returned error: %v", err)
+			}
+			if len(runner.calls) != 1 {
+				t.Fatalf("expected one Helm command, got %d", len(runner.calls))
+			}
+			args := runner.calls[0].args
+			for index := 0; index < len(args)-1; index++ {
+				if args[index] == "--version" && args[index+1] == tt.want {
+					return
+				}
+			}
+			t.Fatalf("expected Helm --version %s, got %v", tt.want, args)
+		})
+	}
+}

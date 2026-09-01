@@ -31,6 +31,7 @@ const llmdRouterHelmReleaseName = "llmd-brixbench"
 const LLMdBenchmarkNamespace = "brixbench-llmd"
 const llmdRouterChart = "oci://ghcr.io/llm-d/charts/llm-d-router-standalone"
 const llmdRouterChartVersion = "v0.9.0"
+const llmdRouterChartVersionV010 = "v0.10.0"
 const llmdGAIEVersion = "v1.5.0"
 const llmdGAIEManifestURL = "https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/v1.5.0/v1-manifests.yaml"
 const llmdRepoURL = "https://github.com/llm-d/llm-d.git"
@@ -296,7 +297,7 @@ func (d *LLMdDeployer) installLLMdRouter(ctx context.Context) error {
 		"upgrade", "--install", llmdRouterHelmReleaseName, llmdRouterChart,
 		"-n", d.namespace,
 		"--create-namespace",
-		"--version", llmdRouterChartVersion,
+		"--version", llmdRouterChartVersionFor(d.version),
 		"--set", "router.monitoring.prometheus.auth.enabled=false",
 	}
 	for _, valuesFile := range d.controlPlanePaths {
@@ -311,6 +312,24 @@ func (d *LLMdDeployer) installLLMdRouter(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// llmdRouterChartVersionFor maps the llm-d git release tag to the standalone
+// router Helm chart. v0.8.1 stays on chart v0.9.0. v0.9.0 and later use
+// chart v0.10.0 (EPP + sidecar v0.10.0). Unparseable versions keep v0.9.0.
+func llmdRouterChartVersionFor(version string) string {
+	if llmdUsesRouterChartV010(version) {
+		return llmdRouterChartVersionV010
+	}
+	return llmdRouterChartVersion
+}
+
+func llmdUsesRouterChartV010(version string) bool {
+	var major, minor, patch int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(strings.TrimSpace(version), "v"), "%d.%d.%d", &major, &minor, &patch); err != nil {
+		return false
+	}
+	return major > 0 || major == 0 && minor >= 9
 }
 
 func (d *LLMdDeployer) patchLLMdRouterImagePullSecret(ctx context.Context) error {
