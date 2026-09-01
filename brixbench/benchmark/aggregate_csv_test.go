@@ -149,7 +149,7 @@ func buildAggregateRows(scenario *resolver.Scenario, summary scenarioSummary, ru
 			// Avoid blank platform_version in dashboards; tip/unknown builds use main.
 			platformVersion = "main"
 		}
-		engineVersion := inferEngineVersion(metrics, platform, platformVersion)
+		engineVersion := inferEngineVersion(metrics, platform, platformVersion, result.TestCase)
 		platformCommit := shortCommit(firstNonEmpty(result.ResolvedCommit, result.Commit, tc.ResolvedCommit, tc.Commit))
 		platformTitle := platform
 		if platform != "" {
@@ -476,7 +476,7 @@ func inferRouter(testcase, platform string) string {
 	}
 }
 
-func inferEngineVersion(metrics map[string]any, platform, platformVersion string) string {
+func inferEngineVersion(metrics map[string]any, platform, platformVersion, testCase string) string {
 	if tok := stringifyValue(metrics["tokenizer_id"]); strings.Contains(tok, "Qwen3") {
 		// tokenizer path is not engine version; fall through to defaults.
 	}
@@ -500,6 +500,13 @@ func inferEngineVersion(metrics map[string]any, platform, platformVersion string
 		default:
 			return "0.23.0"
 		}
+	case "aibrix":
+		// AIBrix version/commit is the control plane, not the engine image.
+		// The 0.26.0 fixture is identified by testcase name.
+		if strings.Contains(testCase, "vllm-0.26.0") {
+			return "0.26.0"
+		}
+		return "0.22.0"
 	default:
 		return "0.22.0"
 	}
@@ -648,7 +655,7 @@ func TestInferEngineVersionForDynamoRelease(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.version, func(t *testing.T) {
-			if got := inferEngineVersion(nil, "dynamo", tt.version); got != tt.want {
+			if got := inferEngineVersion(nil, "dynamo", tt.version, ""); got != tt.want {
 				t.Fatalf("inferEngineVersion(dynamo, %q) = %q, want %q", tt.version, got, tt.want)
 			}
 		})
@@ -667,8 +674,29 @@ func TestInferEngineVersionForLLMdRelease(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.version, func(t *testing.T) {
-			if got := inferEngineVersion(nil, "llmd", tt.version); got != tt.want {
+			if got := inferEngineVersion(nil, "llmd", tt.version, ""); got != tt.want {
 				t.Fatalf("inferEngineVersion(llmd, %q) = %q, want %q", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInferEngineVersionForAIBrixVLLM(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		want    string
+	}{
+		{name: "aibrix-pd-4p4d-multinode-r8", version: "main", want: "0.22.0"},
+		{name: "aibrix-pd-4p4d-singlenode-r8", version: "v0.6.0", want: "0.22.0"},
+		{name: "aibrix-vllm-0.26.0-pd-4p4d-multinode-r8", version: "main", want: "0.26.0"},
+		{name: "aibrix-vllm-0.26.0-pd-4p4d-multinode-r16", version: "main", want: "0.26.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := inferEngineVersion(nil, "aibrix", tt.version, tt.name); got != tt.want {
+				t.Fatalf("inferEngineVersion(aibrix, %q, %q) = %q, want %q", tt.version, tt.name, got, tt.want)
 			}
 		})
 	}
