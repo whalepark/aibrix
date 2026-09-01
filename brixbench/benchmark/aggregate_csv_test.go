@@ -493,7 +493,13 @@ func inferEngineVersion(metrics map[string]any, platform, platformVersion string
 			return "0.21.0"
 		}
 	case "llmd":
-		return "0.23.0"
+		ver := strings.TrimPrefix(platformVersion, "v")
+		switch {
+		case strings.HasPrefix(ver, "0.9."):
+			return "0.26.0"
+		default:
+			return "0.23.0"
+		}
 	default:
 		return "0.22.0"
 	}
@@ -644,6 +650,25 @@ func TestInferEngineVersionForDynamoRelease(t *testing.T) {
 		t.Run(tt.version, func(t *testing.T) {
 			if got := inferEngineVersion(nil, "dynamo", tt.version); got != tt.want {
 				t.Fatalf("inferEngineVersion(dynamo, %q) = %q, want %q", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInferEngineVersionForLLMdRelease(t *testing.T) {
+	tests := []struct {
+		version string
+		want    string
+	}{
+		{version: "v0.8.1", want: "0.23.0"},
+		{version: "v0.9.0", want: "0.26.0"},
+		{version: "main", want: "0.23.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := inferEngineVersion(nil, "llmd", tt.version); got != tt.want {
+				t.Fatalf("inferEngineVersion(llmd, %q) = %q, want %q", tt.version, got, tt.want)
 			}
 		})
 	}
