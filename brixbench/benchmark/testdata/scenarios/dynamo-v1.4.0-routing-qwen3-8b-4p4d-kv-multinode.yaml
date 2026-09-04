@@ -1,0 +1,42 @@
+# Dynamo v1.4.0 + vLLM 0.26.0 Qwen3-8B PD routing with KV-aware frontend.
+# Same 4p4d-multinode workload as dynamo-v1.4.0-routing-qwen3-8b-4p4d-multinode.yaml.
+# Router: --router-mode kv. Do not include "round-robin" in testcase names
+# (aggregate CSV inferRouter matches that substring first).
+Scenario: dynamo-v1.4.0-routing-qwen3-8b-4p4d-kv-multinode
+Tests:
+- name: dynamo-v1.4.0-qwen3-8b-kv-4p4d-multinode-r4
+  provider: dynamo
+  version: 1.4.0
+  platform:
+    valuesFile: testdata/deployments/dynamo/platform-aibrix-mirror-v1.4.0.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/dynamo/qwen3-8b-kv-4p4d-multinode-v1.4.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r4-p1000.yaml
+- name: dynamo-v1.4.0-qwen3-8b-kv-4p4d-multinode-r8
+  provider: dynamo
+  version: 1.4.0
+  platform:
+    valuesFile: testdata/deployments/dynamo/platform-aibrix-mirror-v1.4.0.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/dynamo/qwen3-8b-kv-4p4d-multinode-v1.4.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r8-p1000.yaml
+- name: dynamo-v1.4.0-qwen3-8b-kv-4p4d-multinode-r16
+  provider: dynamo
+  version: 1.4.0
+  platform:
+    valuesFile: testdata/deployments/dynamo/platform-aibrix-mirror-v1.4.0.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/dynamo/qwen3-8b-kv-4p4d-multinode-v1.4.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r16-p1000.yaml
+- name: dynamo-v1.4.0-qwen3-8b-kv-4p4d-multinode-r32
+  provider: dynamo
+  version: 1.4.0
+  platform:
+    valuesFile: testdata/deployments/dynamo/platform-aibrix-mirror-v1.4.0.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/dynamo/qwen3-8b-kv-4p4d-multinode-v1.4.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r32-p1000.yaml

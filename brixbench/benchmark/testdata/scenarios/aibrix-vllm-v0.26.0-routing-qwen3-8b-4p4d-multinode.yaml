@@ -1,4 +1,4 @@
-# AIBrix main + vLLM 0.26.0 Qwen3-8B PD routing — multi-node 4p4d @ 8/16 rps.
+# AIBrix main + vLLM 0.26.0 Qwen3-8B PD routing — multi-node 4p4d @ 4/8/16/32 rps.
 # Same gateway/PD settings as aibrix-routing-qwen3-8b-4p4d-multinode.yaml.
 # Engine image is official vllm/vllm-openai:v0.26.0 so results can be compared
 # with Dynamo v1.4.0 and llm-d v0.9.0. Existing v0.22.0-cu129 fixtures are
@@ -6,6 +6,24 @@
 # prebuilt daily gateway image; otherwise brixbench builds origin/main.
 Scenario: aibrix-vllm-v0.26.0-routing-qwen3-8b-4p4d-multinode
 Tests:
+- name: aibrix-vllm-0.26.0-pd-4p4d-multinode-r4
+  provider: aibrix
+  fullstack: false
+  commit: origin/main
+  gateway:
+    image:
+      baseImage: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/gateway-plugins:v0.6.0
+      outputRepository: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/gateway-plugins
+    env:
+      ROUTING_ALGORITHM: pd
+      AIBRIX_PREFIX_CACHE_BLOCK_SIZE: 512
+    resources:
+    - testdata/deployments/aibrix/gateway/overrides/routing/qwen3-8b-route.yaml
+    - testdata/deployments/aibrix/gateway/overrides/routing/qwen3-8b-gateway-resources.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/aibrix/models/qwen3-8b-pd-4p4d-multinode-vllm-v0.26.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r4-p1000.yaml
 - name: aibrix-vllm-0.26.0-pd-4p4d-multinode-r8
   provider: aibrix
   fullstack: false
@@ -42,3 +60,21 @@ Tests:
     type: vllm
     manifest: testdata/deployments/aibrix/models/qwen3-8b-pd-4p4d-multinode-vllm-v0.26.0.yaml
   benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r16-p1000.yaml
+- name: aibrix-vllm-0.26.0-pd-4p4d-multinode-r32
+  provider: aibrix
+  fullstack: false
+  commit: origin/main
+  gateway:
+    image:
+      baseImage: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/gateway-plugins:v0.6.0
+      outputRepository: aibrix-public-release-cn-beijing.cr.volces.com/aibrix/gateway-plugins
+    env:
+      ROUTING_ALGORITHM: pd
+      AIBRIX_PREFIX_CACHE_BLOCK_SIZE: 512
+    resources:
+    - testdata/deployments/aibrix/gateway/overrides/routing/qwen3-8b-route.yaml
+    - testdata/deployments/aibrix/gateway/overrides/routing/qwen3-8b-gateway-resources.yaml
+  engine:
+    type: vllm
+    manifest: testdata/deployments/aibrix/models/qwen3-8b-pd-4p4d-multinode-vllm-v0.26.0.yaml
+  benchmark: testdata/benchmarks/routing/qwen3-8b-tc-rt-02-pd-4p4d-multinode-r32-p1000.yaml

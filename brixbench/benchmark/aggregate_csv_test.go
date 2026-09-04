@@ -638,6 +638,12 @@ func TestInferTopologyAndRouter(t *testing.T) {
 	if got := inferRouter("dynamo-v1.2.1-qwen3-8b-round-robin-4p4d-multinode-r8", "dynamo"); got != "round-robin" {
 		t.Fatalf("router=%q", got)
 	}
+	if got := inferRouter("dynamo-v1.4.0-qwen3-8b-kv-4p4d-multinode-r8", "dynamo"); got != "kv" {
+		t.Fatalf("router=%q", got)
+	}
+	if got := inferRouter("llmd-v0.9.0-kv-4p4d-multinode-r4", "llmd"); got != "kv" {
+		t.Fatalf("router=%q", got)
+	}
 	if got := inferRouter("llmd-pd-4p4d-multinode-r8", "llmd"); got != "pd" {
 		t.Fatalf("router=%q", got)
 	}
